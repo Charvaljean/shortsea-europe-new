@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Shortsea Europe - Digital Chartering Platform</title>
     
+    <script>
+      // Shim process.env for browser compatibility on Vercel
+      window.process = {
+        env: {
+          API_KEY: undefined,
+          SUPABASE_URL: undefined,
+          SUPABASE_ANON_KEY: undefined
+        }
+      };
+    </script>
+
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -41,10 +52,8 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+  </body>
 </html>
