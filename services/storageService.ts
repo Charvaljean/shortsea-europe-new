@@ -1,4 +1,5 @@
 
+
 import { supabase } from './supabase';
 import { User, ActivityLog, AdvisoryRequest, MarketRateEntry, Ship, Offer, Message, Shipowner, MarketReport } from "../types";
 
@@ -35,12 +36,16 @@ const BASELINE_REPORT: MarketReport = {
 
 export const seedDatabase = async () => {
   try {
-    const { data: users } = await supabase.from('users').select('id').eq('email', 'admin@shortsea.com').maybeSingle();
+    const adminEmail = 'charval@kpnmail.nl';
     
-    if (!users) {
+    // Controleer of de gebruiker al bestaat in Supabase
+    const { data: existingUser } = await supabase.from('users').select('*').eq('email', adminEmail).maybeSingle();
+    
+    if (!existingUser) {
+      // 1. Account bestaat nog niet -> Maak nieuw admin account aan
       const admin: Partial<User> = {
-        email: 'admin@shortsea.com',
-        name: 'Admin HQ', 
+        email: adminEmail,
+        name: 'Admin Charval', 
         company: 'Shortsea Europe HQ',
         role: 'admin', 
         joinedAt: new Date().toISOString(), 
@@ -49,8 +54,20 @@ export const seedDatabase = async () => {
         password: 'admin123'
       };
       await supabase.from('users').insert([admin]);
+      console.log("Admin account created for:", adminEmail);
+    } else {
+      // 2. Account bestaat al -> Forceer Admin rol en wachtwoord 'admin123'
+      // Dit lost het inlogprobleem op als u zich eerder als 'user' had geregistreerd
+      await supabase.from('users').update({ 
+        role: 'admin', 
+        emailVerified: true, 
+        password: 'admin123',
+        status: 'active'
+      }).eq('email', adminEmail);
+      console.log("Admin role and password 'admin123' forced for existing account.");
     }
 
+    // Zorg dat er altijd een basis marktrapport is
     const { data: report } = await supabase.from('market_reports').select('id').maybeSingle();
     if (!report) {
       await supabase.from('market_reports').insert([{ data: BASELINE_REPORT, last_updated: new Date().toISOString() }]);
@@ -87,11 +104,15 @@ export const storageService = {
   },
 
   loginUser: async (email: string, pass: string): Promise<{ user?: User, error?: string }> => {
-    const { data: user, error } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
-    if (error || !user) return { error: 'not_found' };
-    if (user.password !== pass) return { error: 'invalid_password' };
-    if (!user.emailVerified) return { error: 'unverified' };
-    return { user };
+    try {
+        const { data: user, error } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+        if (error || !user) return { error: 'not_found' };
+        if (user.password !== pass) return { error: 'invalid_password' };
+        if (!user.emailVerified) return { error: 'unverified' };
+        return { user };
+    } catch (e) {
+        return { error: 'connection_error' };
+    }
   },
 
   verifyUserEmail: async (email: string, code: string): Promise<boolean> => {
