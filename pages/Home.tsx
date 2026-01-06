@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../App';
 import { useAuth as useAuthContext } from '../context/AuthContext';
@@ -10,7 +9,7 @@ import { QuoteResult } from '../types';
 import { 
   X, Ship, DollarSign, Anchor, CheckCircle2, 
   ClipboardCheck, Handshake,
-  Zap, Loader2, Calculator, ArrowRight, AlertTriangle
+  Zap, Loader2, Calculator, ArrowRight, AlertTriangle, ExternalLink, Globe
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -63,32 +62,31 @@ const Home: React.FC = () => {
         setShowPaywall(true);
         return;
     }
+    
     setQuote(result);
-    
-    // Robuustere check voor het tonen van de knoppen: alleen als distance > 0 (Baltic voyages)
-    const hasValidAlt = !!(result.skagenAlternative && result.skagenAlternative.distance > 0);
-    
+    // Kiel Canal is de hoofdroute (routeDetails), Skagen is het alternatief.
+    const hasValidAlt = !!(result?.skagenAlternative && result.skagenAlternative.distance > 0);
     if (hasValidAlt) {
       setViewMode('kiel'); 
     } else {
       setViewMode('direct');
     }
     
-    await storageService.logActivity(user?.id || 'guest', user?.name || 'Guest', 'QUOTE_CALCULATION', `${result.routeDetails?.origin?.name} to ${result.routeDetails?.destination?.name}`, result);
+    await storageService.logActivity(user?.id || 'guest', user?.name || 'Guest', 'QUOTE_CALCULATION', `${result?.routeDetails?.origin?.name || 'Unknown'} to ${result?.routeDetails?.destination?.name || 'Unknown'}`, result);
     
     await storageService.saveQuickScan({
         userId: user?.id || 'guest',
         userName: user?.name || 'Guest',
         userCompany: user?.company || 'N/A',
-        quote: `Route: ${result.routeDetails?.origin?.name}-${result.routeDetails?.destination?.name}`,
-        result: `Vracht: €${result.estimatedRateLow}-${result.estimatedRateHigh}`
+        quote: `Route: ${result?.routeDetails?.origin?.name || 'Unknown'}-${result?.routeDetails?.destination?.name || 'Unknown'}`,
+        result: `Vracht: €${result?.estimatedRateLow}-${result?.estimatedRateHigh}`
     });
 
     setIsFormOpen(false); 
     setTimeout(() => { resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 300);
   };
 
-  // Check of de route een alternatief toelaat (gebaseerd op AI data)
+  // DATA MAPPING
   const hasAlternative = !!(quote?.skagenAlternative && quote.skagenAlternative.distance > 0);
   const isSkagenActive = viewMode === 'skagen' && hasAlternative;
 
@@ -97,11 +95,13 @@ const Home: React.FC = () => {
   const displayCO2 = isSkagenActive ? quote?.skagenAlternative?.co2 : quote?.co2Emission;
   const displayDays = isSkagenActive ? quote?.skagenAlternative?.days : quote?.voyageDays;
   const displayDistance = isSkagenActive ? quote?.skagenAlternative?.distance : quote?.routeDetails?.distanceNm;
-  const displayWaypoints = isSkagenActive ? quote?.skagenAlternative?.waypoints : quote?.routeDetails?.waypoints;
+  const displayWaypoints = isSkagenActive 
+    ? (quote?.skagenAlternative?.waypoints || []) 
+    : (quote?.routeDetails?.waypoints || []);
 
   return (
     <div className="flex flex-col">
-      {/* Hero Section */}
+      {/* HERO SECTION */}
       <div className="relative min-h-screen bg-[#1e5aa0] flex items-center overflow-hidden no-print">
         <div className="absolute top-0 right-0 w-[50%] h-full bg-gradient-to-l from-blue-900/20 to-transparent z-10 pointer-events-none"></div>
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-30 pt-20 pb-20">
@@ -112,7 +112,7 @@ const Home: React.FC = () => {
                 <span className="text-blue-300">Strategy Dashboard</span>
               </h1>
               <p className="text-lg md:text-xl text-blue-50 max-w-2xl font-medium leading-relaxed drop-shadow">
-                {language === 'nl' ? 'Versterk uw onderhandelingspositie met onafhankelijke data en strategisch advies specifiek voor ladingeigenaren.' : 'Strengthen your negotiation position with independent data and strategic advice specifically for cargo owners.'}
+                {language === 'nl' ? 'Versterk uw onderhandelingspositie met onafhankelijke data en strategisch advies.' : 'Strengthen your negotiation position with independent data and strategic advice.'}
               </p>
 
               <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6 flex items-center gap-6 w-max max-w-full lg:max-w-[140%] shadow-2xl relative z-40 transition-all">
@@ -155,6 +155,7 @@ const Home: React.FC = () => {
       {quote && (
         <div ref={resultRef} className="bg-slate-50 py-20 scroll-mt-20 px-4">
             <div className="max-w-7xl mx-auto space-y-12">
+                {/* PRIMARY DATA CARD */}
                 <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-200 overflow-hidden">
                     <div className="grid grid-cols-1 lg:grid-cols-2">
                         <div className="p-10 lg:p-16 space-y-10">
@@ -163,16 +164,16 @@ const Home: React.FC = () => {
                                     <div className="flex items-center gap-6">
                                         <div className="flex flex-col">
                                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Loading Port</span>
-                                            <h2 className="text-2xl font-black text-slate-900 uppercase m-0">{quote.routeDetails.origin.name}</h2>
+                                            <h2 className="text-2xl font-black text-slate-900 uppercase m-0">{quote?.routeDetails?.origin?.name || 'Unknown'}</h2>
                                         </div>
                                         <ArrowRight className="text-blue-600" size={24} />
                                         <div className="flex flex-col">
                                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Discharge Port</span>
-                                            <h2 className="text-2xl font-black text-slate-900 uppercase m-0">{quote.routeDetails.destination.name}</h2>
+                                            <h2 className="text-2xl font-black text-slate-900 uppercase m-0">{quote?.routeDetails?.destination?.name || 'Unknown'}</h2>
                                         </div>
                                     </div>
-                                    <div className={`flex-shrink-0 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest h-fit ${quote.marketSentiment.status === 'CHARTERER_MARKET' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                                        {quote.marketSentiment.status.replace('_', ' ')}
+                                    <div className={`flex-shrink-0 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest h-fit ${quote?.marketSentiment?.status === 'CHARTERER_MARKET' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                        {quote?.marketSentiment?.status?.replace('_', ' ') || 'BALANCED'}
                                     </div>
                                 </div>
                                 
@@ -201,7 +202,7 @@ const Home: React.FC = () => {
                                         <span className="text-[10px] font-bold uppercase block opacity-60 mb-1">Market Low</span>
                                         <div className="flex items-baseline gap-1">
                                             <span className="text-xl font-bold">€</span>
-                                            <span className="text-4xl lg:text-5xl font-black">{displayRateLow}</span>
+                                            <span className="text-4xl lg:text-5xl font-black">{displayRateLow || '0.00'}</span>
                                         </div>
                                     </div>
                                     <div className="w-px h-12 bg-white/20 hidden sm:block"></div>
@@ -209,7 +210,7 @@ const Home: React.FC = () => {
                                         <span className="text-[10px] font-bold uppercase block opacity-60 mb-1">Market High</span>
                                         <div className="flex items-baseline gap-1">
                                             <span className="text-xl font-bold">€</span>
-                                            <span className="text-4xl lg:text-5xl font-black">{displayRateHigh}</span>
+                                            <span className="text-4xl lg:text-5xl font-black">{displayRateHigh || '0.00'}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -221,24 +222,24 @@ const Home: React.FC = () => {
                                         <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-3 opacity-60 m-0">{t.targetRateTitle}</p>
                                         <div className="flex items-baseline gap-1">
                                             <span className="text-xl font-bold">€</span>
-                                            <span className="text-4xl font-black text-blue-400">{quote.negotiation.targetRate}</span>
+                                            <span className="text-4xl font-black text-blue-400">{quote?.negotiation?.targetRate || '0.00'}</span>
                                         </div>
                                     </div>
                                     <div className="mt-4 pt-4 border-t border-white/10">
                                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 m-0">CO2 Emission Status</p>
-                                        <p className={`text-xs font-black m-0 uppercase ${quote.etsApplicable ? 'text-orange-400' : 'text-green-400'}`}>
-                                            {quote.etsApplicable ? `ETS Payable: €${quote.euEtsCost}` : (quote.exemptionReason || "Exempted (Below 5000 GT)")}
+                                        <p className={`text-xs font-black m-0 uppercase ${quote?.etsApplicable ? 'text-orange-400' : 'text-green-400'}`}>
+                                            {quote?.etsApplicable ? `ETS Payable: €${quote?.euEtsCost}` : (quote?.exemptionReason || "Exempted (Below 5000 GT)")}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 gap-4">
                                     <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 m-0">Voyage Duration</p>
-                                        <p className="text-lg font-black text-slate-800 m-0">{displayDays} <span className="text-[10px] text-slate-400 font-bold uppercase">Days</span></p>
+                                        <p className="text-lg font-black text-slate-800 m-0">{displayDays || '0'} <span className="text-[10px] text-slate-400 font-bold uppercase">Days</span></p>
                                     </div>
                                     <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 m-0">Distance</p>
-                                        <p className="text-lg font-black text-slate-800 m-0">{displayDistance} <span className="text-[10px] text-slate-400 font-bold uppercase">NM</span></p>
+                                        <p className="text-lg font-black text-slate-800 m-0">{displayDistance || '0'} <span className="text-[10px] text-slate-400 font-bold uppercase">NM</span></p>
                                     </div>
                                 </div>
                             </div>
@@ -246,8 +247,8 @@ const Home: React.FC = () => {
 
                         <div className="h-[500px] lg:h-auto min-h-[500px] border-l border-slate-100 relative">
                             <MapComponent 
-                                origin={quote.routeDetails.origin} 
-                                destination={quote.routeDetails.destination} 
+                                origin={quote?.routeDetails?.origin || { lat: 50, lng: 0, name: 'Origin' }} 
+                                destination={quote?.routeDetails?.destination || { lat: 51, lng: 1, name: 'Destination' }} 
                                 waypoints={displayWaypoints}
                             />
                         </div>
@@ -266,15 +267,31 @@ const Home: React.FC = () => {
                     </div>
                 </div>
 
+                {/* STRATEGY & NEGOTIATION DESK */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 bg-white p-10 lg:p-12 rounded-[2.5rem] shadow-xl border border-slate-200">
                         <div className="flex items-center gap-3 mb-8 border-b pb-6 border-slate-50">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Zap size={20}/></div>
                             <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter m-0">{t.strategyAdvice}</h3>
                         </div>
-                        <div className="prose prose-slate max-none prose-sm lg:prose-base font-medium text-slate-600 leading-relaxed">
-                            {language === 'nl' ? quote.marketAdvisoryNl : quote.marketAdvisoryEn}
+                        <div className="prose prose-slate max-w-none font-medium text-slate-600 leading-relaxed text-lg whitespace-pre-wrap">
+                            {language === 'nl' ? (quote?.marketAdvisoryNl || "Berekening loopt...") : (quote?.marketAdvisoryEn || "Calculation in progress...")}
                         </div>
+                        
+                        {quote?.sources && quote.sources.length > 0 && (
+                            <div className="mt-12 pt-8 border-t border-slate-100 animate-fade-in">
+                                <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] mb-4 m-0 flex items-center gap-2">
+                                    <Globe size={14}/> Verified Data Sources (Market Grounding)
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {quote.sources.map((url, i) => (
+                                        <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 hover:bg-blue-50 transition-all text-[10px] font-bold text-slate-500 hover:text-blue-600 no-underline truncate">
+                                            <ExternalLink size={12}/> {new URL(url).hostname}
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="space-y-8">
@@ -282,19 +299,21 @@ const Home: React.FC = () => {
                             <div className="absolute top-0 right-0 p-4 opacity-5"><Handshake size={100}/></div>
                             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-400 mb-8 m-0 border-b border-white/10 pb-4">{t.negotiationDesk}</h3>
                             <div className="space-y-6">
-                                {quote.negotiation.focusPoints.map((point, i) => (
+                                {(quote?.negotiation?.focusPoints && quote.negotiation.focusPoints.length > 0) ? quote.negotiation.focusPoints.map((point, i) => (
                                     <div key={i} className="flex gap-4 items-start">
                                         <div className="mt-1 flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center">
                                             <CheckCircle2 size={12} className="text-white"/>
                                         </div>
                                         <p className="text-sm font-bold text-slate-300 m-0 leading-relaxed">{point}</p>
                                     </div>
-                                ))}
+                                )) : (
+                                    <p className="text-sm italic text-slate-500">Scanning for tactical points...</p>
+                                )}
                             </div>
                             <div className="mt-10 p-6 bg-white/5 rounded-2xl border border-white/10">
                                 <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 m-0">{t.yourLeverage}</p>
                                 <p className="text-sm font-bold text-white m-0 italic leading-relaxed">
-                                    "{language === 'nl' ? quote.negotiation.leverageTextNl : quote.negotiation.leverageTextEn}"
+                                    "{language === 'nl' ? (quote?.negotiation?.leverageTextNl || "Advies wordt gegenereerd...") : (quote?.negotiation?.leverageTextEn || "Generating leverage points...")}"
                                 </p>
                             </div>
                         </div>
