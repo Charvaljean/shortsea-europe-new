@@ -3,13 +3,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CargoRequest, QuoteResult, MarketReport } from "../types";
 
-const aiModel = "gemini-3-pro-preview";
+// Gebruik Flash voor snellere respons in de browser om timeouts op Vercel te voorkomen
+const aiModel = "gemini-3-flash-preview";
 
 const MARITIME_ROUTING_ENGINE_SPEC = `
   ROLE: Lead Maritime Navigator.
   STRICT WATER-ONLY PROTOCOL: 
   - NEVER cross land. Maintain a 15nm buffer from any coastline.
-  - Waypoints: Provide at least 40 coordinates ({lat, lng}) for EVERY route. This is non-negotiable for the map's dashed line.
+  - Waypoints: Provide at least 40 coordinates ({lat, lng}) for EVERY route.
   
   ROUTE MAPPING:
   - 'routeDetails': Kiel Canal route (if Baltic) or shortest sea path.
@@ -29,14 +30,13 @@ const CHARTERER_ADVISORY_RULES = `
 
 const cleanAndParseJSON = (text: string | undefined) => {
   if (!text) return null;
-  // Robust parsing: find the first { and the last }
-  let cleaned = text.trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end !== -1) {
-    cleaned = cleaned.substring(start, end + 1);
-  }
   try {
+    // Zoek naar de eerste '{' en de laatste '}' om alle ruis van de AI te negeren
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1) return null;
+    
+    const cleaned = text.substring(start, end + 1);
     return JSON.parse(cleaned);
   } catch (e) {
     console.error("JSON Parsing failed", e);
@@ -45,7 +45,10 @@ const cleanAndParseJSON = (text: string | undefined) => {
 };
 
 export const getFreightQuote = async (req: CargoRequest, lang: string): Promise<QuoteResult & { sources?: string[] }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key missing");
+
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Calculate a High-Precision Maritime Strategy for ${req.volume}mt ${req.cargoType} from ${req.loadPort} to ${req.dischargePort}.
   Output raw JSON only. 
   Required fields: estimatedRateLow, estimatedRateHigh, marketAdvisoryEn, marketAdvisoryNl, routeDetails (with origin name, destination name, and 40+ waypoints), skagenAlternative (with 40+ waypoints), negotiation, marketSentiment.`;
@@ -56,16 +59,17 @@ export const getFreightQuote = async (req: CargoRequest, lang: string): Promise<
         contents: prompt, 
         config: { 
           systemInstruction: MARITIME_ROUTING_ENGINE_SPEC + "\n" + CHARTERER_ADVISORY_RULES,
-          // Optimization for Vercel/Speed:
           thinkingConfig: { thinkingBudget: 0 }
         } 
       });
 
-      const result = cleanAndParseJSON(response.text) || ({} as any);
+      const result = cleanAndParseJSON(response.text);
+      if (!result) throw new Error("Ongeldige respons van AI");
+      
       return { ...result, sources: [] };
   } catch (error: any) {
       console.error("AI Service Error:", error);
-      throw new Error("Systeem synchronisatie fout. Klik a.u.b. nogmaals op de knop om te herhalen.");
+      throw new Error("Systeem synchronisatie fout. Klik a.u.b. nogmaals op de knop.");
   }
 };
 
@@ -76,9 +80,12 @@ export const analyzeBrokerQuote = async (
   fileData?: { data: string, mimeType: string },
   aiDraft?: string
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return "API Key missing";
+
+  const ai = new GoogleGenAI({ apiKey });
   let context = `Recent Fixtures: ${JSON.stringify(manualRates.slice(0, 10))}`;
-  const professionalPrompt = `Audit broker offer: "${quoteText}". ${context} Provide a Strategic Counter-Strategy for the Charterer using live market grounding.`;
+  const professionalPrompt = `Audit broker offer: "${quoteText}". ${context} Provide a Strategic Counter-Strategy for the Charterer.`;
   
   const parts: any[] = [{ text: professionalPrompt }];
   if (fileData) parts.push({ inlineData: fileData });
@@ -100,16 +107,19 @@ export const analyzeBrokerQuote = async (
 
     let textResult = response.text || "Analyse mislukt.";
     if (urls.length > 0) {
-        textResult += "\n\n---\n**Geverifieerde Bronnen (Market Grounding):**\n" + Array.from(new Set(urls)).map(u => `- ${u}`).join('\n');
+        textResult += "\n\n---\n**Geverifieerde Bronnen:**\n" + Array.from(new Set(urls)).map(u => `- ${u}`).join('\n');
     }
     return textResult;
   } catch (error: any) { 
-      return "Systeem synchronisatie fout op de cloud server. Probeer het over een moment opnieuw."; 
+      return "Systeem synchronisatie fout op de cloud server. Probeer het opnieuw."; 
   }
 };
 
 export const calculateRouteDistance = async (origin: string, destination: string, options: any) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key missing");
+
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Calculate sea distance from ${origin} to ${destination}. Return JSON with 'distance' (number), 'routeDescription' (string), and 'waypoints' (array of {lat, lng}, minimum 40 points).`;
   try {
     const response = await ai.models.generateContent({ 
@@ -125,7 +135,10 @@ export const calculateRouteDistance = async (origin: string, destination: string
 };
 
 export const generateMarketReport = async (): Promise<MarketReport> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key missing");
+
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Generate Full Shortsea Market Intel report. Return JSON only. Use Search for live indices and bunkers.`;
   try {
       const response = await ai.models.generateContent({ 
@@ -146,7 +159,9 @@ export const getIceRestrictions = async (port: string) => executeStrategicSearch
 export const estimatePortDisbursements = async (port: string, gt: number) => executeStrategicSearch(`D/A estimate for ${gt}GT vessel at ${port}. Output JSON.`);
 
 const executeStrategicSearch = async (prompt: string): Promise<any> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) return null;
+    const ai = new GoogleGenAI({ apiKey });
     try {
         const response = await ai.models.generateContent({ 
           model: aiModel, 
@@ -161,7 +176,9 @@ const executeStrategicSearch = async (prompt: string): Promise<any> => {
 };
 
 export const getLiveEUAPrice = async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) return 85.0;
+    const ai = new GoogleGenAI({ apiKey });
     try {
         const response = await ai.models.generateContent({ 
           model: aiModel, 
@@ -176,7 +193,9 @@ export const getLiveEUAPrice = async () => {
 };
 
 export const findRealTimeShips = async (region: string, minDwt: number, maxDwt: number) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return "API Key missing";
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({ 
     model: aiModel, 
     contents: `Find open tonnage ${region} ${minDwt}-${maxDwt}dwt. Use Search.`, 
@@ -189,7 +208,9 @@ export const findRealTimeShips = async (region: string, minDwt: number, maxDwt: 
 };
 
 export const generateDeepDiveAnalysis = async (region: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return "API Key missing";
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const response = await ai.models.generateContent({ 
       model: aiModel, 
@@ -205,7 +226,9 @@ export const generateDeepDiveAnalysis = async (region: string) => {
 };
 
 export const getCommodityStowage = async (commodity: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return null;
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const response = await ai.models.generateContent({ 
       model: aiModel, 
@@ -219,7 +242,9 @@ export const getCommodityStowage = async (commodity: string) => {
 };
 
 export const analyzeSofPdf = async (fileData: { data: string, mimeType: string }) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return null;
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const response = await ai.models.generateContent({ 
       model: aiModel, 
