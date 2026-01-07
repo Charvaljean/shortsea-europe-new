@@ -1,0 +1,307 @@
+
+
+import { supabase } from './supabase';
+import { User, ActivityLog, AdvisoryRequest, MarketRateEntry, Ship, Offer, Message, Shipowner, MarketReport } from "../types";
+
+const BASELINE_REPORT: MarketReport = {
+  lastUpdated: new Date().toLocaleDateString('nl-NL'),
+  generalAdvisory: "Market Intelligence Desk - Active. Ready for analysis.",
+  shortseaIndex: 3100,
+  shortseaChange: "+0.2%",
+  regions: [
+    { id: 'baltic', name: 'Baltic Sea', trend: 'stable', iconKey: 'globe', freightIndex: 3150, change: '0%', vesselsAvailable: '14 Coasters Spot', avgFreight: '€24.50', highlights: ['Ice restrictions monitoring active in Kemi.', 'Baltic grain export exposure increasing.'] },
+    { id: 'northsea', name: 'North Sea / UKC', trend: 'stable', iconKey: 'globe', freightIndex: 2900, change: '0%', vesselsAvailable: '8 Coasters Spot', avgFreight: '€18.20', highlights: ['Port congestion alerts for major UKC hubs.', 'Steel coil demand validation stable.'] },
+    { id: 'med', name: 'Mediterranean Sea', trend: 'firm', iconKey: 'globe', freightIndex: 2750, change: '+1.2%', vesselsAvailable: '6 Coasters Spot', avgFreight: '€21.10', highlights: ['High activity levels in East Med ports.', 'Bunker exposure monitoring for Algeciras.'] },
+    { id: 'blacksea', name: 'Black Sea', trend: 'soft', iconKey: 'globe', freightIndex: 3400, change: '-0.5%', vesselsAvailable: '4 Coasters Spot', avgFreight: '€32.00', highlights: ['Risk premiums and insurance validation required.', 'Operational stability monitoring for Constanta.'] }
+  ],
+  bunkers: [
+    { port: 'Rotterdam', price: 585, change: -2 },
+    { port: 'Algeciras', price: 615, change: 5 },
+    { port: 'Gdynia', price: 630, change: 0 }
+  ],
+  commodities: [
+    { name: 'Wheat', status: 'HIGH', desc: 'Baltic exports peaking, increasing demand for 3000dwt units.' },
+    { name: 'Steel Coils', status: 'STABLE', desc: 'UKC imports consistent, no immediate rate fluctuations.' }
+  ],
+  macroDrivers: [],
+  freightHistory: [
+    { month: 'Oct', index: 3050 }, { month: 'Nov', index: 3080 }, { month: 'Dec', index: 3100 }
+  ],
+  portVolumes: [],
+  cargoDistribution: [
+    { type: 'Bulk', percentage: 45 }, { type: 'Breakbulk', percentage: 25 }, { type: 'Container', percentage: 20 }, { type: 'Project', percentage: 10 }
+  ]
+};
+
+const withTimeout = (promise: Promise<any>, timeoutMs: number = 4000) => {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Database connection timeout")), timeoutMs))
+    ]);
+};
+
+export const seedDatabase = async () => {
+  try {
+    const adminEmail = 'Charval@kpnmail.nl';
+    const { data: existingUser } = await withTimeout(supabase.from('users').select('*').eq('email', adminEmail).maybeSingle());
+    
+    if (!existingUser) {
+      const admin: Partial<User> = {
+        email: adminEmail,
+        name: 'Admin Charval', 
+        company: 'Shortsea Europe HQ',
+        role: 'admin', 
+        joinedAt: new Date().toISOString(), 
+        emailVerified: true, 
+        status: 'active',
+        password: 'admin1234@'
+      };
+      await supabase.from('users').insert([admin]);
+    } else {
+      await supabase.from('users').update({ 
+        role: 'admin', 
+        emailVerified: true, 
+        password: 'admin1234@',
+        status: 'active'
+      }).eq('email', adminEmail);
+    }
+
+    const { data: report } = await withTimeout(supabase.from('market_reports').select('id').maybeSingle());
+    if (!report) {
+      await supabase.from('market_reports').insert([{ data: BASELINE_REPORT, last_updated: new Date().toISOString() }]);
+    }
+  } catch (e) {
+    console.error("Seed error:", e);
+  }
+};
+
+export const storageService = {
+  getUsers: async (): Promise<User[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('users').select('*'));
+        return data || [];
+    } catch (e) { return []; }
+  },
+
+  saveUser: async (data: Partial<User>, pass: string): Promise<User> => {
+    const newUser: Partial<User> = {
+      email: data.email!,
+      name: data.name!,
+      company: data.company!,
+      role: 'user',
+      joinedAt: new Date().toISOString(),
+      emailVerified: false,
+      verificationCode: Math.floor(100000 + Math.random() * 900000).toString(),
+      status: 'active',
+      subscriptionPlan: 'free',
+      password: pass,
+      ...data
+    };
+    const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+    if (error) throw error;
+    return insertedUser;
+  },
+
+  loginUser: async (email: string, pass: string): Promise<{ user?: User, error?: string }> => {
+    // ADMIN BYPASS
+    if (email.toLowerCase() === 'charval@kpnmail.nl' && pass === 'admin1234@') {
+        return { 
+          user: {
+            id: 'admin_charval_fix',
+            email: 'Charval@kpnmail.nl',
+            name: 'Admin Charval',
+            company: 'Shortsea Europe HQ',
+            role: 'admin',
+            joinedAt: new Date().toISOString(),
+            emailVerified: true,
+            status: 'active',
+            subscriptionPlan: 'enterprise'
+          }
+        };
+    }
+
+    try {
+        const { data: user, error } = await withTimeout(supabase.from('users').select('*').eq('email', email).maybeSingle());
+        if (error || !user) return { error: 'not_found' };
+        if (user.password !== pass) return { error: 'invalid_password' };
+        if (!user.emailVerified) return { error: 'unverified' };
+        return { user };
+    } catch (e) {
+        return { error: 'connection_error' };
+    }
+  },
+
+  verifyUserEmail: async (email: string, code: string): Promise<boolean> => {
+    try {
+        const { data: user } = await withTimeout(supabase.from('users').select('*').eq('email', email).maybeSingle());
+        if (user && user.verificationCode === code) {
+          await supabase.from('users').update({ emailVerified: true }).eq('email', email);
+          return true;
+        }
+        return false;
+    } catch(e) { return false; }
+  },
+
+  resendVerificationCode: async (email: string): Promise<string | null> => {
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const { error } = await supabase.from('users').update({ verificationCode: newCode }).eq('email', email);
+    return error ? null : newCode;
+  },
+
+  toggleUserStatus: async (id: string) => {
+    const { data: user } = await supabase.from('users').select('status').eq('id', id).maybeSingle();
+    if (user) {
+      const newStatus = user.status === 'suspended' ? 'active' : 'suspended';
+      await supabase.from('users').update({ status: newStatus }).eq('id', id);
+    }
+  },
+
+  updateUserSubscription: async (id: string, plan: string): Promise<boolean> => {
+    const { error } = await supabase.from('users').update({ subscriptionPlan: plan }).eq('id', id);
+    return !error;
+  },
+
+  logActivity: async (userId: string, userName: string, action: string, details: string, logData?: any) => {
+    try {
+      await supabase.from('activity_logs').insert([{
+        userId, userName, action, details, timestamp: new Date().toISOString(), data: logData
+      }]);
+    } catch(e) {}
+  },
+
+  getUsageCount: async (userId?: string): Promise<number> => {
+    try {
+      const { count } = await withTimeout(supabase.from('activity_logs')
+        .select('*', { count: 'exact', head: true })
+        .eq('userId', userId || 'guest')
+        .in('action', ['QUOTE_CALCULATION', 'TOOL_USAGE']), 2000);
+      return count || 0;
+    } catch(e) { return 0; }
+  },
+
+  checkTrialStatus: (user: User) => {
+    const joined = new Date(user.joinedAt).getTime();
+    const now = Date.now();
+    const daysLeft = Math.max(0, 7 - Math.floor((now - joined) / (1000 * 60 * 60 * 24)));
+    return { expired: daysLeft <= 0, daysLeft };
+  },
+
+  getMarketRates: async (): Promise<MarketRateEntry[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('market_rates').select('*').order('date', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  addMarketRate: async (rate: any) => { await supabase.from('market_rates').insert([rate]); },
+  updateMarketRate: async (id: string, data: any) => { await supabase.from('market_rates').update(data).eq('id', id); },
+  deleteMarketRate: async (id: string) => { await supabase.from('market_rates').delete().eq('id', id); },
+  restoreMarketRates: async (newData: any[]) => {
+    await supabase.from('market_rates').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('market_rates').insert(newData);
+  },
+
+  getFleet: async (): Promise<Ship[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('ships').select('*'));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  addVessel: async (v: any) => { await supabase.from('ships').insert([v]); },
+  deleteVessel: async (id: string) => { await supabase.from('ships').delete().eq('id', id); },
+  getShipowners: async (): Promise<Shipowner[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('shipowners').select('*'));
+        return data || [];
+    } catch(e) { return []; }
+  },
+  deleteShipowner: async (id: string) => { await supabase.from('shipowners').delete().eq('id', id); },
+
+  getOffers: async (): Promise<Offer[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('offers').select('*').order('createdAt', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  createOffer: async (data: any) => {
+    await supabase.from('offers').insert([{
+      status: 'OPEN', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), correspondence: [], ...data
+    }]);
+  },
+
+  getAdvisories: async (): Promise<AdvisoryRequest[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('advisories').select('*').order('timestamp', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  saveAdvisory: async (req: AdvisoryRequest) => { await supabase.from('advisories').insert([req]); },
+  updateAdvisory: async (id: string, text: string) => { await supabase.from('advisories').update({ finalAdvice: text, status: 'RELEASED' }).eq('id', id); },
+  updateAdvisoryDraft: async (id: string, proAiDraft: string) => { await supabase.from('advisories').update({ proAiDraft }).eq('id', id); },
+  deleteAdvisory: async (id: string) => { await supabase.from('advisories').delete().eq('id', id); },
+
+  getQuickScans: async (): Promise<any[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('quick_scans').select('*').order('timestamp', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  saveQuickScan: async (scan: any) => {
+    await supabase.from('quick_scans').insert([{
+      timestamp: new Date().toISOString(), ...scan
+    }]);
+  },
+
+  deleteQuickScan: async (id: string) => { await supabase.from('quick_scans').delete().eq('id', id); },
+
+  getMessages: async (): Promise<Message[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('messages').select('*').order('timestamp', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  sendMessage: async (fromAdmin: boolean, userId: string, content: string, options: any = {}) => {
+    await supabase.from('messages').insert([{
+      fromAdmin, userId, content, timestamp: new Date().toISOString(), read: false, ...options
+    }]);
+  },
+
+  deleteMessage: async (id: string) => { await supabase.from('messages').delete().eq('id', id); },
+
+  getBunkerEntries: async (): Promise<any[]> => {
+    try {
+        const { data } = await withTimeout(supabase.from('bunker_entries').select('*').order('date', { ascending: false }));
+        return data || [];
+    } catch(e) { return []; }
+  },
+
+  saveBunkerEntry: async (entry: any) => {
+    if (entry.id) { await supabase.from('bunker_entries').update(entry).eq('id', entry.id); }
+    else { await supabase.from('bunker_entries').insert([{ createdAt: new Date().toISOString(), ...entry }]); }
+  },
+
+  deleteBunkerEntry: async (id: string) => { await supabase.from('bunker_entries').delete().eq('id', id); },
+
+  getGlobalMarketReport: async (): Promise<MarketReport | null> => {
+    try {
+      const { data } = await withTimeout(supabase.from('market_reports').select('data').order('last_updated', { ascending: false }).limit(1).maybeSingle(), 2000);
+      return data ? data.data : BASELINE_REPORT;
+    } catch(e) { return BASELINE_REPORT; }
+  },
+
+  saveGlobalMarketReport: async (report: MarketReport) => {
+    await supabase.from('market_reports').insert([{ data: report, last_updated: new Date().toISOString() }]);
+  },
+
+  claimGuestData: async (userId: string, userName: string, userCompany: string) => {
+    try {
+      await supabase.from('quick_scans').update({ userId, userName, userCompany }).eq('userId', 'guest');
+      await supabase.from('messages').update({ userId }).eq('userId', 'guest');
+    } catch(e) {}
+  }
+};
